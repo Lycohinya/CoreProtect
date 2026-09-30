@@ -445,7 +445,10 @@ public class Consumer extends Process implements Runnable, Thread.UncaughtExcept
         try {
             while (Consumer.consumer_id.get(process_id)[1] > 0 || ((ConfigHandler.serverRunning || ConfigHandler.converterRunning || ConfigHandler.migrationRunning) && (Consumer.isPaused || ConfigHandler.pauseConsumer || ConfigHandler.purgeRunning))) {
                 pausedSuccess = true;
-                Thread.sleep(100);
+                boolean onlyReservations = !(Consumer.isPaused || ConfigHandler.pauseConsumer || ConfigHandler.purgeRunning);
+                // Lycohinya fork: in-flight queue reservations finish within microseconds; with the
+                // MySQL fast path the buffer is processed right after the swap, so poll them briefly.
+                Thread.sleep(onlyReservations && usesAdaptiveWait() ? 1 : 100);
             }
         }
         catch (Exception e) {
@@ -477,12 +480,98 @@ public class Consumer extends Process implements Runnable, Thread.UncaughtExcept
         }
     }
 
+    /**
+     * Lycohinya fork: MySQL/MariaDB consumer pacing. Upstream always slept 500 ms after every buffer
+     * swap, leaving the database idle for 500 ms per cycle even when the next buffer was already full.
+     * The fork waits before the swap instead: it swaps as soon as the filling buffer holds
+     * {@link #ADAPTIVE_WAKE_THRESHOLD} events (queue producers unpark the consumer when the threshold is
+     * crossed) or when {@link #ADAPTIVE_MAX_WAIT_MILLIS} have passed since the previous swap, whichever
+     * comes first. The wait is a bounded park, never a spin. Failure backlog (a buffer that was not
+     * drained) and the shutdown drain keep the upstream 500 ms delay.
+     *
+     * <p>OFF by default (opt in with {@code -Dcoreprotect.lycohinya.adaptiveConsumer=true}). Bench runs
+     * showed that processing buffers right after the swap makes container transactions queued through
+     * the asynchronous ContainerTransactionDispatcher get logged one by one against the live inventory,
+     * which exposes an upstream race (the live inventory may already contain the next, not yet
+     * registered, change) and recorded +1 item per chest in some runs. Keep it off until that race is
+     * fixed at its source.
+     */
+    static final int ADAPTIVE_WAKE_THRESHOLD = Integer.getInteger("coreprotect.lycohinya.consumerWakeThreshold", 1000);
+    static final long ADAPTIVE_MAX_WAIT_MILLIS = 500L;
+    private static final boolean ADAPTIVE_WAIT_ENABLED = "true".equalsIgnoreCase(System.getProperty("coreprotect.lycohinya.adaptiveConsumer", "false"));
+    private static volatile Thread parkedConsumer = null;
+
+    static boolean usesAdaptiveWait() {
+        return usesAdaptiveWait(ADAPTIVE_WAIT_ENABLED, ConfigHandler.databaseType);
+    }
+
+    static boolean usesAdaptiveWait(boolean enabled, net.coreprotect.database.DatabaseType databaseType) {
+        return enabled && databaseType != null && databaseType.isMySQL();
+    }
+
+    /**
+     * Called by queue producers (under the queue lock) after records were appended to a buffer.
+     */
+    static void notifyQueued(int sizeBefore, int sizeAfter) {
+        if (sizeBefore < ADAPTIVE_WAKE_THRESHOLD && sizeAfter >= ADAPTIVE_WAKE_THRESHOLD) {
+            Thread waiting = parkedConsumer;
+            if (waiting != null) {
+                LockSupport.unpark(waiting);
+            }
+        }
+    }
+
+    /**
+     * Bounded wait until the filling buffer holds enough events, the deadline passes, or shutdown starts.
+     */
+    static void awaitQueuedWork(long deadlineNanos) throws InterruptedException {
+        parkedConsumer = Thread.currentThread();
+        try {
+            while (ConfigHandler.serverRunning || ConfigHandler.converterRunning) {
+                if (getConsumerSize(currentConsumer) >= ADAPTIVE_WAKE_THRESHOLD) {
+                    return;
+                }
+                long remaining = deadlineNanos - System.nanoTime();
+                if (remaining <= 0L) {
+                    return;
+                }
+                LockSupport.parkNanos(Consumer.class, remaining);
+                if (Thread.interrupted()) {
+                    throw new InterruptedException();
+                }
+            }
+        }
+        finally {
+            parkedConsumer = null;
+        }
+    }
+
+    /**
+     * Lycohinya fork: picks the buffer to process and whether to swap the filling buffer.
+     * Upstream always swapped, so when the previously processed buffer was left undrained (paused,
+     * no connection within the timeout, failed commit) the newer buffer was written first and the
+     * older leftovers later, persisting events out of order. The fork retries the undrained buffer
+     * first and keeps producers on the filling buffer until it drains.
+     *
+     * @return {processId, swap ? 1 : 0}
+     */
+    static int[] selectProcessBuffer(int currentConsumer, boolean[] drained) {
+        int idle = currentConsumer == 0 ? 1 : 0;
+        if (!drained[idle]) {
+            return new int[] { idle, 0 };
+        }
+        return new int[] { currentConsumer, 1 };
+    }
+
     @Override
     public void run() {
         boolean lastRun = false;
+        boolean finalSwapPending = false;
         boolean[] drained = { true, true };
+        long lastSwapNanos = System.nanoTime();
 
-        while (ConfigHandler.serverRunning || ConfigHandler.converterRunning || !lastRun) {
+        while (ConfigHandler.serverRunning || ConfigHandler.converterRunning || !lastRun || finalSwapPending) {
+            finalSwapPending = false;
             if (!ConfigHandler.serverRunning && !ConfigHandler.converterRunning) {
                 lastRun = true;
             }
@@ -505,23 +594,33 @@ public class Consumer extends Process implements Runnable, Thread.UncaughtExcept
                         continue;
                     }
                 }
-                int process_id = 0;
+                boolean backlog = lastRun || !drained[0] || !drained[1];
+                boolean adaptive = !backlog && usesAdaptiveWait();
+                if (adaptive) {
+                    awaitQueuedWork(lastSwapNanos + ADAPTIVE_MAX_WAIT_MILLIS * 1_000_000L);
+                }
+                int process_id;
+                boolean retryUndrained;
                 synchronized (Consumer.consumer_id) {
-                    if (currentConsumer == 0) {
-                        currentConsumer = 1;
-                    }
-                    else {
-                        process_id = 1;
-                        currentConsumer = 0;
+                    int[] selection = selectProcessBuffer(currentConsumer, drained);
+                    process_id = selection[0];
+                    retryUndrained = selection[1] == 0;
+                    if (!retryUndrained) {
+                        currentConsumer = process_id == 0 ? 1 : 0;
                     }
                 }
-                Thread.sleep(consumerDelay(lastRun || !drained[0] || !drained[1]));
+                lastSwapNanos = System.nanoTime();
+                if (!adaptive) {
+                    Thread.sleep(consumerDelay(backlog));
+                }
                 pauseConsumer(process_id);
                 try {
                     processConsumerBatch(process_id, lastRun);
                 }
                 finally {
                     drained[process_id] = getConsumerSize(process_id) == 0;
+                    // Shutdown: once the older leftovers are written, run one more pass for the filling buffer.
+                    finalSwapPending = lastRun && retryUndrained && drained[process_id];
                 }
             }
             catch (Exception e) {

@@ -2,9 +2,11 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>net.coreprotect</groupId>
   <artifactId>CoreProtect</artifactId>
-  <version>24.1</version>
+  <version>24.1-lycohinya.1</version>
   <properties>
-    <project.branch></project.branch>
+    <!-- Lycohinya fork: upstream refuses to start with an empty branch. "lycohinya" is not "-dev" (schema
+         patches still run), not "edge"/"coreprotect" (no official-build claim); the plugin stays Community Edition. -->
+    <project.branch>lycohinya</project.branch>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <skipTests>true</skipTests>
     <maven.compiler.release>11</maven.compiler.release>

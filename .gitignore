@@ -53,7 +53,15 @@ nbproject
 
 target
 dependency-reduced-pom.xml
-src/test
+src/test/**
+# Lycohinya fork: upstream keeps its tests out of the repo; the fork's own regression tests are tracked
+!src/test/**/
+!src/test/java/net/coreprotect/consumer/LookupGateTest.java
+!src/test/java/net/coreprotect/consumer/ConsumerAdaptiveWaitTest.java
+!src/test/java/net/coreprotect/consumer/ConsumerBufferOrderTest.java
+!src/test/java/net/coreprotect/database/RelationalConsumerWriteBatchTest.java
+!src/test/java/net/coreprotect/database/RelationalConsumerWriteBatchDatabaseTest.java
+!src/test/java/net/coreprotect/database/RecordingJdbc.java
 maven_output.txt
 
 # Wrapper files

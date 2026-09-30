@@ -135,13 +135,16 @@ public class Queue {
             }
             Consumer.consumerUsers.get(currentConsumer).put(consumerId, user);
             Consumer.consumerObjects.get(currentConsumer).put(consumerId, object);
+            ArrayList<Object[]> buffer = Consumer.consumer.get(currentConsumer);
+            int sizeBefore = buffer.size();
             if (first) {
-                Consumer.consumer.get(currentConsumer).add(0, data);
+                buffer.add(0, data);
             }
             else {
-                Consumer.consumer.get(currentConsumer).add(data);
+                buffer.add(data);
             }
             published = true;
+            Consumer.notifyQueued(sizeBefore, sizeBefore + 1);
         }
         finally {
             try {

@@ -37,11 +37,19 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
     private static final int INITIAL_DUCKDB_BLOCK_ID_RESERVATION = 256;
     private static final int MAXIMUM_DUCKDB_BLOCK_ID_RESERVATION = 65536;
     private static final long[] EMPTY_ROW_IDS = new long[0];
+    /**
+     * Lycohinya fork: flush a batched statement once it holds this many pending rows. Upstream flushed
+     * when the consumer event index was a multiple of 1000, which let a statement accumulate an
+     * unbounded number of rows (interleaved event types) or flush the same statement once per row
+     * when a single event produced many rows (container transactions).
+     */
+    static final int MAX_PENDING_ROWS_PER_STATEMENT = 1000;
 
     private final Connection connection;
     private final DatabaseType databaseType;
     private final Statement transactionStatement;
     private final PreparedStatement[] batchStatements = new PreparedStatement[16];
+    private final int[] pendingRows = new int[batchStatements.length];
     private final List<PreparedStatement> statements = new ArrayList<>();
 
     private PreparedStatement blockReturningStatement;
@@ -91,14 +99,14 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
             finishDuckDBBlockAppender();
             boolean acknowledgedRollback = Database.isRollbackOnlyTransactionAcknowledged();
             if (!Database.isTransactionRollbackOnly()) {
-                for (PreparedStatement statement : batchStatements) {
-                    if (statement != null) {
-                        statement.executeBatch();
-                    }
-                }
+                executePendingBatches();
                 if (duckDBSpatialIndex != null) {
                     duckDBSpatialIndex.flush(connection);
                 }
+            }
+            else {
+                // rows queued for a rollback-only transaction must never leak into the next transaction
+                discardPendingBatches();
             }
             boolean committed = Database.commitTransactionChecked(transactionStatement, databaseType, () -> commitAttempted = true);
             if (!committed) {
@@ -114,10 +122,52 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         }
         catch (Exception exception) {
             Database.reportDatabaseFailure(exception);
+            discardPendingBatches();
             Database.rollbackTransaction(transactionStatement, databaseType);
             duckDBSpatialIndex = null;
             return false;
         }
+    }
+
+    /**
+     * Sends every pending batch to the server. This is not a commit: the rows stay inside the open
+     * transaction. Pending counters are reset whether or not the batch succeeds, because JDBC clears a
+     * statement's batch after executeBatch in both cases.
+     */
+    private void executePendingBatches() throws SQLException {
+        for (int index = 0; index < batchStatements.length; index++) {
+            PreparedStatement statement = batchStatements[index];
+            if (statement != null) {
+                try {
+                    statement.executeBatch();
+                }
+                finally {
+                    pendingRows[index] = 0;
+                }
+            }
+        }
+    }
+
+    /**
+     * Drops rows that were queued but not yet sent, e.g. after a rollback.
+     */
+    private void discardPendingBatches() {
+        for (int index = 0; index < batchStatements.length; index++) {
+            PreparedStatement statement = batchStatements[index];
+            if (statement != null) {
+                try {
+                    statement.clearBatch();
+                }
+                catch (Exception exception) {
+                    Database.reportDatabaseFailure(exception);
+                }
+            }
+            pendingRows[index] = 0;
+        }
+    }
+
+    int pendingRows(int index) {
+        return pendingRows[index];
     }
 
     @Override
@@ -133,13 +183,28 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         catch (Exception exception) {
             Database.reportDatabaseFailure(exception);
         }
+        discardPendingBatches();
         Database.rollbackTransaction(transactionStatement, databaseType);
         duckDBSpatialIndex = null;
     }
 
     @Override
     public void executeAtomically(String name, Database.SavepointOperation operation) throws Exception {
-        Database.executeSavepoint(transactionStatement, name, operation);
+        if (databaseType.isDuckDB()) {
+            Database.executeSavepoint(transactionStatement, name, operation);
+            return;
+        }
+
+        // Lycohinya fork: rows batched before the savepoint are sent first so a savepoint rollback can
+        // neither undo them nor leave rows queued by the failed operation behind in the JDBC batch.
+        executePendingBatches();
+        try {
+            Database.executeSavepoint(transactionStatement, name, operation);
+        }
+        catch (Exception exception) {
+            discardPendingBatches();
+            throw exception;
+        }
     }
 
     @Override
@@ -242,28 +307,34 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
     @Override
     public void addReference(ReferenceKind kind, int batchCount, int id, String value) throws Exception {
         PreparedStatement statement;
+        int batchIndex;
         switch (kind) {
             case ART:
-                statement = batchStatement(Database.ART, ART_BATCH);
+                batchIndex = ART_BATCH;
+                statement = batchStatement(Database.ART, batchIndex);
                 break;
             case BLOCK_DATA:
-                statement = batchStatement(Database.BLOCKDATA, BLOCK_DATA_BATCH);
+                batchIndex = BLOCK_DATA_BATCH;
+                statement = batchStatement(Database.BLOCKDATA, batchIndex);
                 break;
             case ENTITY:
-                statement = batchStatement(Database.ENTITY_MAP, ENTITY_MAP_BATCH);
+                batchIndex = ENTITY_MAP_BATCH;
+                statement = batchStatement(Database.ENTITY_MAP, batchIndex);
                 break;
             case MATERIAL:
-                statement = batchStatement(Database.MATERIAL, MATERIAL_BATCH);
+                batchIndex = MATERIAL_BATCH;
+                statement = batchStatement(Database.MATERIAL, batchIndex);
                 break;
             case WORLD:
-                statement = batchStatement(Database.WORLD, WORLD_BATCH);
+                batchIndex = WORLD_BATCH;
+                statement = batchStatement(Database.WORLD, batchIndex);
                 break;
             default:
                 throw new IllegalArgumentException("Unsupported reference kind " + kind);
         }
         statement.setInt(1, id);
         statement.setString(2, value);
-        addBatch(statement, batchCount);
+        addBatch(statement, batchIndex);
     }
 
     @Override
@@ -274,7 +345,7 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         }
         PreparedStatement statement = batchStatement(Database.BLOCK, BLOCK_BATCH);
         setBlock(statement, time, userId, worldId, x, y, z, type, data, meta, blockData, action, rolledBack);
-        addBatch(statement, batchCount);
+        addBatch(statement, BLOCK_BATCH);
     }
 
     @Override
@@ -318,7 +389,7 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         statement.setObject(10, metadata);
         statement.setInt(11, action);
         statement.setInt(12, rolledBack);
-        addBatch(statement, batchCount);
+        addBatch(statement, CONTAINER_BATCH);
         trackDuckDBGenerated("container", worldId, x, z);
     }
 
@@ -338,7 +409,7 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         statement.setObject(11, metadata);
         statement.setInt(12, action);
         statement.setInt(13, rolledBack);
-        addBatch(statement, batchCount);
+        addBatch(statement, ENTITY_CONTAINER_BATCH);
         trackDuckDBGenerated("entity_container", worldId, x, z, entitySpawnRowId);
     }
 
@@ -356,7 +427,7 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         statement.setInt(9, amount);
         statement.setInt(10, action);
         statement.setInt(11, rolledBack);
-        addBatch(statement, batchCount);
+        addBatch(statement, ITEM_BATCH);
         trackDuckDBGenerated("item", worldId, x, z);
     }
 
@@ -364,7 +435,7 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
     public void addChat(int batchCount, long time, int userId, int worldId, int x, int y, int z, String message) throws Exception {
         PreparedStatement statement = batchStatement(Database.CHAT, CHAT_BATCH);
         setMessage(statement, time, userId, worldId, x, y, z, message);
-        addBatch(statement, batchCount);
+        addBatch(statement, CHAT_BATCH);
         trackDuckDBGenerated("chat", worldId, x, z);
     }
 
@@ -372,7 +443,7 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
     public void addCommand(int batchCount, long time, int userId, int worldId, int x, int y, int z, String message) throws Exception {
         PreparedStatement statement = batchStatement(Database.COMMAND, COMMAND_BATCH);
         setMessage(statement, time, userId, worldId, x, y, z, message);
-        addBatch(statement, batchCount);
+        addBatch(statement, COMMAND_BATCH);
         trackDuckDBGenerated("command", worldId, x, z);
     }
 
@@ -386,7 +457,7 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         statement.setInt(5, y);
         statement.setInt(6, z);
         statement.setInt(7, action);
-        addBatch(statement, batchCount);
+        addBatch(statement, SESSION_BATCH);
         trackDuckDBGenerated("session", worldId, x, z);
     }
 
@@ -411,7 +482,7 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         for (int index = 0; index < lines.length; index++) {
             statement.setString(13 + index, lines[index]);
         }
-        addBatch(statement, batchCount);
+        addBatch(statement, SIGN_BATCH);
         trackDuckDBGenerated("sign", worldId, x, z);
     }
 
@@ -834,10 +905,15 @@ public final class RelationalConsumerWriteBatch implements ConsumerWriteBatch {
         return statement;
     }
 
-    private static void addBatch(PreparedStatement statement, int batchCount) throws SQLException {
+    private void addBatch(PreparedStatement statement, int batchIndex) throws SQLException {
         statement.addBatch();
-        if (batchCount > 0 && batchCount % 1000 == 0) {
-            statement.executeBatch();
+        if (++pendingRows[batchIndex] >= MAX_PENDING_ROWS_PER_STATEMENT) {
+            try {
+                statement.executeBatch();
+            }
+            finally {
+                pendingRows[batchIndex] = 0;
+            }
         }
     }
 

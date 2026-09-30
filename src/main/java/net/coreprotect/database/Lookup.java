@@ -15,7 +15,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.command.CommandSender;
 
-import net.coreprotect.consumer.Consumer;
+import net.coreprotect.consumer.LookupGate;
 import net.coreprotect.consumer.Queue;
 import net.coreprotect.model.action.EntityActionFilter;
 import net.coreprotect.model.action.LookupActions;
@@ -59,11 +59,7 @@ public class Lookup extends Queue {
         boolean paused = false;
 
         try {
-            while (Consumer.isPaused && !Consumer.isPersistenceHalted()) {
-                Thread.sleep(1);
-            }
-            Consumer.isPaused = true;
-            paused = true;
+            paused = LookupGate.acquire();
 
             try (ResultSet results = LookupRaw.rawLookupResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, messageFilters, entityContext, location, radius, null, startTime, endTime, -1, -1, restrictWorld, lookup, true, entityContainerId, rollbackState)) {
                 while (results.next()) {
@@ -80,9 +76,7 @@ public class Lookup extends Queue {
             ErrorReporter.report(e);
         }
         finally {
-            if (paused && !Consumer.isPersistenceHalted()) {
-                Consumer.isPaused = false;
-            }
+            LookupGate.release(paused);
         }
 
         return rows;
@@ -104,11 +98,7 @@ public class Lookup extends Queue {
 
         boolean paused = false;
         try {
-            while (Consumer.isPaused && !Consumer.isPersistenceHalted()) {
-                Thread.sleep(1);
-            }
-            Consumer.isPaused = true;
-            paused = true;
+            paused = LookupGate.acquire();
             try (ResultSet results = LookupRaw.rawSummaryResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, entityContext, location, radius, startTime, endTime, -1, -1, restrictWorld, entityContainerId, true, rollbackState)) {
                 return results.next() ? results.getLong("count") : 0L;
             }
@@ -118,9 +108,7 @@ public class Lookup extends Queue {
             return 0L;
         }
         finally {
-            if (paused && !Consumer.isPersistenceHalted()) {
-                Consumer.isPaused = false;
-            }
+            LookupGate.release(paused);
         }
     }
 
@@ -141,11 +129,7 @@ public class Lookup extends Queue {
         List<LookupSummaryRow> rows = new ArrayList<>();
         boolean paused = false;
         try {
-            while (Consumer.isPaused && !Consumer.isPersistenceHalted()) {
-                Thread.sleep(1);
-            }
-            Consumer.isPaused = true;
-            paused = true;
+            paused = LookupGate.acquire();
             try (ResultSet results = LookupRaw.rawSummaryResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, entityContext, location, radius, startTime, endTime, limitOffset, limitCount, restrictWorld, entityContainerId, false, rollbackState)) {
                 while (results.next()) {
                     rows.add(summaryRow(results));
@@ -156,9 +140,7 @@ public class Lookup extends Queue {
             ErrorReporter.report(e);
         }
         finally {
-            if (paused && !Consumer.isPersistenceHalted()) {
-                Consumer.isPaused = false;
-            }
+            LookupGate.release(paused);
         }
         return rows;
     }
@@ -181,11 +163,7 @@ public class Lookup extends Queue {
         long totalRows = 0L;
         boolean paused = false;
         try {
-            while (Consumer.isPaused && !Consumer.isPersistenceHalted()) {
-                Thread.sleep(1);
-            }
-            Consumer.isPaused = true;
-            paused = true;
+            paused = LookupGate.acquire();
             try (ResultSet results = LookupRaw.rawSummaryPageResultSet(statement, user, checkUuids, checkUsers, restrictList, excludeList, excludeUserList, actionList, entityActionFilter, entityContext, location, radius, startTime, endTime, limitOffset, limitCount, restrictWorld, entityContainerId, rollbackState)) {
                 while (results.next()) {
                     if (rows.isEmpty()) {
@@ -199,9 +177,7 @@ public class Lookup extends Queue {
             ErrorReporter.report(e);
         }
         finally {
-            if (paused && !Consumer.isPersistenceHalted()) {
-                Consumer.isPaused = false;
-            }
+            LookupGate.release(paused);
         }
         return new LookupSummaryPage(totalRows, rows);
     }

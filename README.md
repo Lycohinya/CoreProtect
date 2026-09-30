@@ -8,6 +8,26 @@
 
 # CoreProtect
 
+> **Lycohinya fork notice (Modified Version under the Artistic License 2.0, section 4).**
+> This repository ([Lycohinya/CoreProtect](https://github.com/Lycohinya/CoreProtect)) is an unofficial modified
+> version of [PlayPro/CoreProtect](https://github.com/PlayPro/CoreProtect) by Intelli and contributors. It is not
+> the official CoreProtect distribution and is not supported by the CoreProtect team; please do not send its
+> errors to upstream (set `error-reporting: false` and `check-updates: false`). Versions carry a
+> `-lycohinya.N` suffix (e.g. `24.1-lycohinya.1`) and the build branch is `lycohinya`. The database schema and
+> API are unchanged. Differences from upstream `7582ab4`:
+>
+> - MySQL/MariaDB only: read-only lookups no longer pause the consumer writer through the global `isPaused` flag
+>   (`consumer/LookupGate.java`); they still wait for purge/patch/migration. SQLite, DuckDB and ClickHouse keep
+>   the upstream behaviour.
+> - Batched inserts flush each statement after 1,000 of its own pending rows instead of on every event index that
+>   is a multiple of 1,000; rows queued before a savepoint are sent before it, and rollback/failed commits clear
+>   queued rows (`database/RelationalConsumerWriteBatch.java`).
+> - Experimental, OFF by default: `-Dcoreprotect.lycohinya.adaptiveConsumer=true` makes the MySQL/MariaDB consumer
+>   swap buffers as soon as 1,000 events are queued or 500 ms have passed instead of always sleeping 500 ms after
+>   each swap (`consumer/Consumer.java`, `consumer/Queue.java`). It stays off because it exposes an upstream race
+>   in container-transaction logging (asynchronous transaction registration vs. live inventory read), which
+>   recorded extra items in bench runs.
+
 CoreProtect is a fast, efficient data logging and anti-griefing tool. Inspect, lookup, rollback, and restore any amount of damage without impacting your server performance.
 
 CoreProtect is the [#1 anti-griefing plugin](https://bstats.org/plugin/bukkit/CoreProtect), and has been actively developed since early 2012.

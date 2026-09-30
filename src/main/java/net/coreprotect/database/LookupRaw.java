@@ -23,7 +23,7 @@ import org.bukkit.entity.EntityType;
 import net.coreprotect.bukkit.BukkitAdapter;
 import net.coreprotect.config.Config;
 import net.coreprotect.config.ConfigHandler;
-import net.coreprotect.consumer.Consumer;
+import net.coreprotect.consumer.LookupGate;
 import net.coreprotect.consumer.Queue;
 import net.coreprotect.database.clickhouse.ClickHouseLookup;
 import net.coreprotect.database.statement.EntitySpawnStatement;
@@ -98,11 +98,7 @@ public class LookupRaw extends Queue {
 
         boolean paused = false;
         try {
-            while (Consumer.isPaused && !Consumer.isPersistenceHalted()) {
-                Thread.sleep(1);
-            }
-            Consumer.isPaused = true;
-            paused = true;
+            paused = LookupGate.acquire();
 
             Map<Integer, List<PageRow>> pageRows = new HashMap<>();
             long totalRows = Math.max(knownTotalRows, 0L);
@@ -155,9 +151,7 @@ public class LookupRaw extends Queue {
             return new RawLookupPage(knownTotalRows > 0L ? knownTotalRows : 0L, Collections.emptyList(), null);
         }
         finally {
-            if (paused && !Consumer.isPersistenceHalted()) {
-                Consumer.isPaused = false;
-            }
+            LookupGate.release(paused);
         }
     }
 
@@ -184,12 +178,8 @@ public class LookupRaw extends Queue {
         boolean paused = false;
         ResultSet results = null;
         try {
-            while (managePause && Consumer.isPaused && !Consumer.isPersistenceHalted()) {
-                Thread.sleep(1);
-            }
             if (managePause) {
-                Consumer.isPaused = true;
-                paused = true;
+                paused = LookupGate.acquire();
             }
 
             if (ConfigHandler.databaseType.isClickHouse() && pageRows == null && limitOffset >= 0 && limitCount > 0) {
@@ -386,9 +376,7 @@ public class LookupRaw extends Queue {
                     ErrorReporter.report(e);
                 }
             }
-            if (paused && !Consumer.isPersistenceHalted()) {
-                Consumer.isPaused = false;
-            }
+            LookupGate.release(paused);
         }
         return list;
     }
