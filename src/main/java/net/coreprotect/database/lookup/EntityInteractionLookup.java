@@ -27,6 +27,7 @@ import net.coreprotect.utility.Color;
 import net.coreprotect.utility.EntitySpawnTracking;
 import net.coreprotect.utility.EntityUtils;
 import net.coreprotect.utility.ErrorReporter;
+import net.coreprotect.utility.NameTranslation;
 import net.coreprotect.utility.WorldUtils;
 
 public final class EntityInteractionLookup {
@@ -104,7 +105,7 @@ public final class EntityInteractionLookup {
                     String coordinateInfo = displayWorldId == originWorldId && displayX == originX && displayY == originY && displayZ == originZ ? "" : ChatUtils.getCoordinateTooltip(originWorldId, originX, originY, originZ, Phrase.build(Phrase.LOOKUP_ENTITY_INTERACTION_ORIGIN), true);
                     String selector = actionSelector(actionId);
                     String timeAgo = ChatUtils.getTimeSince(resultTime, currentTime, true);
-                    result.add(timeAgo + " " + Color.WHITE + "- " + Phrase.build(Phrase.LOOKUP_ENTITY_INTERACTION, Color.DARK_AQUA + rollbackFormat + resultUser + Color.WHITE + rollbackFormat, Color.DARK_AQUA + rollbackFormat + target + Color.WHITE + coordinateInfo, selector));
+                    result.add(timeAgo + " " + Color.WHITE + "- " + Phrase.build(Phrase.LOOKUP_ENTITY_INTERACTION, Color.DARK_AQUA + rollbackFormat + resultUser + Color.WHITE + rollbackFormat, Color.DARK_AQUA + rollbackFormat + NameTranslation.entity(target) + Color.WHITE + coordinateInfo, selector));
                     PluginChannelListener.getInstance().sendData(commandSender, resultTime, Phrase.LOOKUP_ENTITY_INTERACTION, selector, resultUser, target, -1, displayX, displayY, displayZ, displayWorldId, rollbackFormat, false, false);
                 }
             }

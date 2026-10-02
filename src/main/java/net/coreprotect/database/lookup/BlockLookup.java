@@ -194,7 +194,7 @@ public class BlockLookup {
                         coordinateInfo = ChatUtils.getCoordinateTooltip(originWorldId, originX, originY, originZ, Phrase.build(Phrase.LOOKUP_ENTITY_ORIGIN), true);
                     }
                 }
-                resultTextBuilder.append(timeAgo + " " + tag + " ").append(Phrase.build(phrase, Color.DARK_AQUA + rbFormat + resultUser + Color.WHITE + rbFormat, Color.DARK_AQUA + rbFormat + target + Color.WHITE + coordinateInfo, selector)).append("\n");
+                resultTextBuilder.append(timeAgo + " " + tag + " ").append(Phrase.build(phrase, Color.DARK_AQUA + rbFormat + resultUser + Color.WHITE + rbFormat, Color.DARK_AQUA + rbFormat + ((resultAction == 3 || resultAction == LookupActions.ENTITY_SPAWN) ? NameTranslation.entity(target) : NameTranslation.block(target)) + Color.WHITE + coordinateInfo, selector)).append("\n");
                 PluginChannelListener.getInstance().sendData(commandSender, resultTime, phrase, selector, resultUser, target, -1, x, y, z, worldId, rbFormat, false, tag.contains("+"));
             }
 

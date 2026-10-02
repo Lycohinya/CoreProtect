@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>net.coreprotect</groupId>
   <artifactId>CoreProtect</artifactId>
-  <version>24.1-lycohinya.1</version>
+  <version>24.1-lycohinya.2</version>
   <properties>
     <!-- Lycohinya fork: upstream refuses to start with an empty branch. "lycohinya" is not "-dev" (schema
          patches still run), not "edge"/"coreprotect" (no official-build claim); the plugin stays Community Edition. -->

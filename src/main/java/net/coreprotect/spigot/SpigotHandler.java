@@ -1,6 +1,7 @@
 package net.coreprotect.spigot;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -9,12 +10,14 @@ import org.bukkit.DyeColor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.ConsoleCommandSender;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
 import org.bukkit.entity.Villager;
 
 import net.coreprotect.config.Config;
 import net.coreprotect.model.entity.VillagerReputationData;
 import net.coreprotect.utility.Chat;
 import net.coreprotect.utility.Color;
+import net.coreprotect.utility.NameTranslation;
 import net.coreprotect.utility.StringUtils;
 import net.coreprotect.utility.Util;
 import net.coreprotect.utility.ErrorReporter;
@@ -23,11 +26,13 @@ import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
+import net.md_5.bungee.api.chat.TranslatableComponent;
 import net.md_5.bungee.api.chat.hover.content.Text;
 
 public class SpigotHandler extends SpigotAdapter implements SpigotInterface {
 
     public static ChatColor DARK_AQUA = ChatColor.of("#31b0e8");
+    private static final char NAME_PLACEHOLDER = (char) 0xE003;
 
     public SpigotHandler() {
         Color.DARK_AQUA = SpigotHandler.DARK_AQUA.toString();
@@ -65,7 +70,7 @@ public class SpigotHandler extends SpigotAdapter implements SpigotInterface {
         try {
             if (Config.getGlobal().HOVER_EVENTS) {
                 String tooltipText = data[1]; // text displayed inside tooltip
-                TextComponent component = new TextComponent(TextComponent.fromLegacyText(data[2]));
+                TextComponent component = new TextComponent(legacyComponents(data[2]));
                 // BaseComponent[] displayComponent = TextComponent.fromLegacyText(processComponent(tooltipText));
 
                 if (tooltipText.contains(Color.MAGIC)) {
@@ -130,6 +135,10 @@ public class SpigotHandler extends SpigotAdapter implements SpigotInterface {
         if (sender instanceof ConsoleCommandSender) {
             string = string.replace(SpigotHandler.DARK_AQUA.toString(), ChatColor.DARK_AQUA.toString());
         }
+        if (!(sender instanceof Player)) {
+            // only players have a client that can translate names
+            string = NameTranslation.strip(string);
+        }
 
         Matcher matcher = Util.tagParser.matcher(string);
         while (matcher.find()) {
@@ -141,7 +150,7 @@ public class SpigotHandler extends SpigotAdapter implements SpigotInterface {
 
                 String[] data = value.split("\\|", 3);
                 if (data[0].equals(Chat.COMPONENT_COMMAND)) {
-                    TextComponent component = new TextComponent(TextComponent.fromLegacyText(data[2]));
+                    TextComponent component = new TextComponent(legacyComponents(data[2]));
                     component.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, data[1]));
                     SpigotAdapter.ADAPTER.setHoverEvent(component, StringUtils.hoverCommandFilter(data[1]));
                     message.addExtra(component);
@@ -212,10 +221,14 @@ public class SpigotHandler extends SpigotAdapter implements SpigotInterface {
     private static void addBuilder(TextComponent message, StringBuilder builder) {
         String[] splitBuilder = builder.toString().split(SpigotHandler.DARK_AQUA.toString());
         for (int i = 0; i < splitBuilder.length; i++) {
+            boolean translated = NameTranslation.containsMarker(splitBuilder[i]);
             if (i > 0) {
-                TextComponent textComponent = new TextComponent(splitBuilder[i]);
+                TextComponent textComponent = translated ? new TextComponent(legacyComponents(splitBuilder[i])) : new TextComponent(splitBuilder[i]);
                 textComponent.setColor(SpigotHandler.DARK_AQUA);
                 message.addExtra(textComponent);
+            }
+            else if (translated) {
+                message.addExtra(new TextComponent(legacyComponents(splitBuilder[i])));
             }
             else {
                 message.addExtra(splitBuilder[i]);
@@ -223,6 +236,48 @@ public class SpigotHandler extends SpigotAdapter implements SpigotInterface {
         }
 
         builder.setLength(0);
+    }
+
+    /**
+     * Legacy-formatted text to components, with each name marker turned into a client-translated component that keeps the formatting active at that position.
+     */
+    static BaseComponent[] legacyComponents(String text) {
+        if (!NameTranslation.containsMarker(text)) {
+            return TextComponent.fromLegacyText(text);
+        }
+
+        List<String> keys = new ArrayList<>();
+        String parsed = NameTranslation.replaceMarkers(text, NAME_PLACEHOLDER, keys);
+        List<BaseComponent> result = new ArrayList<>();
+        int keyIndex = 0;
+        for (BaseComponent component : TextComponent.fromLegacyText(parsed)) {
+            String content = component instanceof TextComponent ? ((TextComponent) component).getText() : null;
+            if (content == null || content.indexOf(NAME_PLACEHOLDER) == -1) {
+                result.add(component);
+                continue;
+            }
+
+            int start = 0;
+            int end;
+            while ((end = content.indexOf(NAME_PLACEHOLDER, start)) > -1) {
+                if (end > start) {
+                    TextComponent piece = new TextComponent((TextComponent) component);
+                    piece.setText(content.substring(start, end));
+                    result.add(piece);
+                }
+                TranslatableComponent name = new TranslatableComponent(keys.get(keyIndex++));
+                name.copyFormatting(component, true);
+                result.add(name);
+                start = end + 1;
+            }
+            if (start < content.length()) {
+                TextComponent piece = new TextComponent((TextComponent) component);
+                piece.setText(content.substring(start));
+                result.add(piece);
+            }
+        }
+
+        return result.toArray(new BaseComponent[0]);
     }
 
     private static Object invokeNoArgumentMethod(Object target, String methodName) {

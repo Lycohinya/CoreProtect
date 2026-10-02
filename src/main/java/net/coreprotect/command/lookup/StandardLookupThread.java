@@ -54,6 +54,7 @@ import net.coreprotect.utility.EntityUtils;
 import net.coreprotect.utility.EntitySpawnTracking;
 import net.coreprotect.utility.ItemUtils;
 import net.coreprotect.utility.MaterialUtils;
+import net.coreprotect.utility.NameTranslation;
 import net.coreprotect.utility.StringUtils;
 import net.coreprotect.utility.WorldUtils;
 import net.coreprotect.utility.ErrorReporter;
@@ -488,7 +489,7 @@ public class StandardLookupThread implements Runnable {
                                 }
 
                                 String coordinateInfo = entityLocation == null ? "" : entityLocation.getOriginTooltip();
-                                Chat.sendComponent(player, timeago + " " + tag + " " + Phrase.build(Phrase.LOOKUP_CONTAINER, Color.DARK_AQUA + rbd + dplayer + Color.WHITE + rbd, "x" + amount, ChatUtils.createTooltip(Color.DARK_AQUA + rbd + dname, tooltip) + coordinateInfo + ChatUtils.filterComponent(player.hasPermission("coreprotect.give"), ChatUtils.createGiveItemComponent(Color.GREY + "(↓)", command.getName(), itemId)) + Color.WHITE, selector));
+                                Chat.sendComponent(player, timeago + " " + tag + " " + Phrase.build(Phrase.LOOKUP_CONTAINER, Color.DARK_AQUA + rbd + dplayer + Color.WHITE + rbd, "x" + amount, ChatUtils.createTooltip(Color.DARK_AQUA + rbd + NameTranslation.block(dname), tooltip) + coordinateInfo + ChatUtils.filterComponent(player.hasPermission("coreprotect.give"), ChatUtils.createGiveItemComponent(Color.GREY + "(↓)", command.getName(), itemId)) + Color.WHITE, selector));
                                 PluginChannelListener.getInstance().sendData(player, Integer.parseInt(time), Phrase.LOOKUP_CONTAINER, selector, dplayer, dname, amount, dataX, dataY, dataZ, wid, rbd, true, tag.contains("+"));
                             }
                         }
@@ -534,8 +535,10 @@ public class StandardLookupThread implements Runnable {
 
                                 String dname = "";
                                 boolean isPlayer = false;
+                                boolean entityName = false;
                                 if (entityInteraction) {
                                     dname = EntityInteractionLookup.entityName(dtype);
+                                    entityName = true;
                                 }
                                 else if ((daction == LookupActions.ENTITY_KILL || daction == LookupActions.ENTITY_SPAWN) && !actions.contains(LookupActions.ITEM) && amount == -1) {
                                     if (daction == LookupActions.ENTITY_KILL && dtype == 0) {
@@ -544,6 +547,7 @@ public class StandardLookupThread implements Runnable {
                                     }
                                     else {
                                         dname = EntityUtils.getEntityType(dtype).name();
+                                        entityName = true;
                                     }
                                 }
                                 else {
@@ -594,7 +598,7 @@ public class StandardLookupThread implements Runnable {
                                         action = "a:container";
                                     }
 
-                                    Chat.sendComponent(player, timeago + " " + tag + " " + Phrase.build(phrase, Color.DARK_AQUA + rbd + dplayer + Color.WHITE + rbd, "x" + amount, ChatUtils.createTooltip(Color.DARK_AQUA + rbd + dname, tooltip) + ChatUtils.filterComponent(player.hasPermission("coreprotect.give"), ChatUtils.createGiveItemComponent(Color.GREY + "(↓)", command.getName(), itemId)) + Color.WHITE, selector));
+                                    Chat.sendComponent(player, timeago + " " + tag + " " + Phrase.build(phrase, Color.DARK_AQUA + rbd + dplayer + Color.WHITE + rbd, "x" + amount, ChatUtils.createTooltip(Color.DARK_AQUA + rbd + NameTranslation.block(dname), tooltip) + ChatUtils.filterComponent(player.hasPermission("coreprotect.give"), ChatUtils.createGiveItemComponent(Color.GREY + "(↓)", command.getName(), itemId)) + Color.WHITE, selector));
                                     PluginChannelListener.getInstance().sendData(player, Integer.parseInt(time), phrase, selector, dplayer, dname, (tag.contains("+") ? 1 : -1), dataX, dataY, dataZ, wid, rbd, action.contains("container"), tag.contains("+"));
                                 }
                                 else {
@@ -629,7 +633,7 @@ public class StandardLookupThread implements Runnable {
                                         tag = (daction != LookupActions.BLOCK_BREAK ? Color.GREEN + "+" : Color.RED + "-");
                                     }
 
-                                    Chat.sendComponent(player, timeago + " " + tag + " " + Phrase.build(phrase, Color.DARK_AQUA + rbd + dplayer + Color.WHITE + rbd, Color.DARK_AQUA + rbd + dname + Color.WHITE, selector));
+                                    Chat.sendComponent(player, timeago + " " + tag + " " + Phrase.build(phrase, Color.DARK_AQUA + rbd + dplayer + Color.WHITE + rbd, Color.DARK_AQUA + rbd + (entityName ? NameTranslation.entity(dname) : NameTranslation.block(dname)) + Color.WHITE, selector));
                                     PluginChannelListener.getInstance().sendData(player, Integer.parseInt(time), phrase, selector, dplayer, dname, (tag.contains("+") ? 1 : -1), dataX, dataY, dataZ, wid, rbd, false, tag.contains("+"));
                                 }
 
@@ -709,6 +713,7 @@ public class StandardLookupThread implements Runnable {
             if (materialName.startsWith("minecraft:")) {
                 materialName = materialName.substring("minecraft:".length());
             }
+            materialName = NameTranslation.block(materialName);
 
             long removedAmount = row.getRemovedAmount();
             long placedAmount = row.getPlacedAmount();

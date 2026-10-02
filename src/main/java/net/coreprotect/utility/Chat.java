@@ -40,7 +40,7 @@ public final class Chat {
     }
 
     public static void sendMessage(CommandSender sender, String message) {
-        message = translateColorCodes(message);
+        message = NameTranslation.strip(translateColorCodes(message));
         if (sender instanceof ConsoleCommandSender) {
             message = message.replace(Color.DARK_AQUA, ChatColor.DARK_AQUA.toString());
         }

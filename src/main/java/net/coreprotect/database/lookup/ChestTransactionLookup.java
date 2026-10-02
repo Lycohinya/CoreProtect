@@ -26,6 +26,7 @@ import net.coreprotect.utility.ChatUtils;
 import net.coreprotect.utility.Color;
 import net.coreprotect.utility.ItemUtils;
 import net.coreprotect.utility.MaterialUtils;
+import net.coreprotect.utility.NameTranslation;
 import net.coreprotect.utility.WorldUtils;
 import net.coreprotect.utility.ErrorReporter;
 import net.coreprotect.utility.DatabaseUtils;
@@ -191,7 +192,7 @@ public class ChestTransactionLookup {
                 if (entitySpawnRowId != null && (displayWorldId != resultWorldId || displayX != resultX || displayY != resultY || displayZ != resultZ)) {
                     coordinateInfo = ChatUtils.getCoordinateTooltip(resultWorldId, resultX, resultY, resultZ, Phrase.build(Phrase.LOOKUP_ENTITY_ORIGIN), true);
                 }
-                result.add(timeAgo + " " + tag + " " + Phrase.build(Phrase.LOOKUP_CONTAINER, Color.DARK_AQUA + rbFormat + resultUser + Color.WHITE + rbFormat, "x" + resultAmount, ChatUtils.createTooltip(Color.DARK_AQUA + rbFormat + target, tooltip) + coordinateInfo + Color.WHITE, selector));
+                result.add(timeAgo + " " + tag + " " + Phrase.build(Phrase.LOOKUP_CONTAINER, Color.DARK_AQUA + rbFormat + resultUser + Color.WHITE + rbFormat, "x" + resultAmount, ChatUtils.createTooltip(Color.DARK_AQUA + rbFormat + NameTranslation.block(target), tooltip) + coordinateInfo + Color.WHITE, selector));
                 PluginChannelListener.getInstance().sendData(commandSender, resultTime, Phrase.LOOKUP_CONTAINER, selector, resultUser, target, resultAmount, displayX, displayY, displayZ, displayWorldId, rbFormat, true, tag.contains("+"));
             }
             results.close();

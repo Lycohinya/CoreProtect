@@ -11,6 +11,7 @@ import org.bukkit.entity.Villager;
 import net.coreprotect.bukkit.BukkitAdapter;
 import net.coreprotect.config.ConfigHandler;
 import net.coreprotect.utility.Chat;
+import net.coreprotect.utility.NameTranslation;
 import net.coreprotect.utility.Util;
 
 public class SpigotAdapter implements SpigotInterface {
@@ -63,6 +64,7 @@ public class SpigotAdapter implements SpigotInterface {
     public void sendComponent(CommandSender sender, String string, String bypass) {
         StringBuilder message = new StringBuilder();
 
+        string = NameTranslation.strip(string);
         Matcher matcher = Util.tagParser.matcher(string);
         while (matcher.find()) {
             String value = matcher.group(1);
